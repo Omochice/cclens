@@ -1,8 +1,13 @@
 name: Release
 
 # Publishing a GitHub Release is what starts this: write the notes, publish, and
-# the binaries and the Homebrew tap follow. The release therefore exists before
-# its assets do — expect a few minutes with the notes up and nothing attached.
+# the binaries, the Homebrew tap, and the crates.io release follow. The release
+# therefore exists before its assets do — expect a few minutes with the notes up
+# and nothing attached.
+#
+# The tag is the single source of the version. Nothing in the tree records it:
+# `version` in Cargo.toml is a placeholder the crates.io job rewrites from the
+# tag, so cutting a release never means remembering to bump a file first.
 on:
   release:
     types: [published]
@@ -230,3 +235,87 @@ jobs:
           git -c credential.helper= \
               -c credential.helper='!f() { echo username=x-access-token; echo "password=$TAP_TOKEN"; }; f' \
               push origin HEAD:main
+
+  # The third distribution channel, next to the release assets and the tap.
+  # Gated on the cross-platform build because this is the one step in the file a
+  # re-run cannot undo: a crates.io version is permanent — it can be yanked, but
+  # never replaced or deleted — so a target that stopped compiling should stop
+  # the publish rather than be discovered afterwards.
+  crates-io:
+    name: publish to crates.io
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      # Trusted publishing: the OIDC token minted for this job is exchanged for
+      # a crates.io token that lives minutes, so no long-lived registry
+      # credential is stored in this repository at all. `contents: read` narrows
+      # the file-level `contents: write`, which only the asset upload needs.
+      #
+      # crates.io must know this job first: the crate's Settings > Trusted
+      # Publishing names this repository, `release.yml`, and this job's
+      # environment (none). That registration can only be made on a crate that
+      # already exists, so the very first version is published by hand.
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Set version from tag
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # cargo would reject a non-semver version much later, after the
+          # verification build; fail on the tag itself instead. Close enough to
+          # semver that anything reaching cargo is accepted there: no leading
+          # zeros, a prerelease before build metadata, one of each at most.
+          printf '%s' "$version" |
+            grep -Eq '^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*)){2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' || {
+            echo "tag ${TAG} does not name a semver version" >&2
+            exit 1
+          }
+          # The version reaches perl through the environment, not through the
+          # program text, so a tag can never be read as code. Only the first
+          # line-anchored `version =` is rewritten — that is the package's, since
+          # dependency versions all sit inside inline tables.
+          VERSION="$version" \
+            perl -0pi -e 's/^version = "[^"]*"/version = "$ENV{VERSION}"/m' Cargo.toml
+          # `--workspace` re-resolves workspace members only — a dependency is
+          # touched solely if it has gone missing from the lock — so what gets
+          # published carries the tagged commit's dependency set, and --locked
+          # below still means the committed lock.
+          cargo update --workspace
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # Re-running the workflow on a release whose version is already up must be
+      # a no-op, like the --clobber upload and the tap's "already up to date"
+      # above — an existing version is the expected state of a re-run, not an
+      # error.
+      - name: Check whether the version is already published
+        id: check
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: cclens release workflow (https://github.com/lambdalisue/cclens)' \
+            "https://crates.io/api/v1/crates/cclens/${VERSION}")
+          case "$code" in
+            200) echo "cclens ${VERSION} is already on crates.io"
+                 echo "published=true" >> "$GITHUB_OUTPUT" ;;
+            404) echo "published=false" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "unexpected status ${code} from crates.io" >&2; exit 1 ;;
+          esac
+
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+        if: steps.check.outputs.published == 'false'
+
+      # --allow-dirty: the rewrite above leaves Cargo.toml and Cargo.lock
+      # modified against the tagged commit, which is the whole design — the
+      # version is never committed. The packaged files are the working tree's,
+      # so the crate carries the tag's version.
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked --allow-dirty

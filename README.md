@@ -17,6 +17,13 @@ With Homebrew (macOS and Linux, Intel and arm):
 brew install lambdalisue/cclens/cclens
 ```
 
+With Cargo, from [crates.io](https://crates.io/crates/cclens) (builds from
+source; bundled SQLite needs a C compiler):
+
+```sh
+cargo install cclens
+```
+
 With Nix (no toolchain to set up):
 
 ```sh
@@ -39,10 +46,15 @@ Rust; the flake just pins it. CI runs `nix develop -c just check` / `just test`.
 
 Publishing a GitHub Release for a `vX.Y.Z` tag builds binaries for Linux, macOS,
 and Windows (x86_64 and arm64 each), attaches them to that release with
-`.sha256` files, and points the
+`.sha256` files, points the
 [`lambdalisue/homebrew-cclens`](https://github.com/lambdalisue/homebrew-cclens)
-tap at the new archives. The release is published before its assets are built,
-so the notes are visible for a few minutes with nothing attached yet.
+tap at the new archives, and publishes the crate to crates.io. The release is
+published before its assets are built, so the notes are visible for a few
+minutes with nothing attached yet.
+
+The tag is the only place a version is written down: the release workflow
+rewrites `version` in `Cargo.toml` from it before publishing, so the committed
+`0.0.0` is a placeholder and cutting a release never means bumping a file first.
 
 The tap covers Linux and macOS only; on Windows, take the `-pc-windows-msvc`
 archive for your arch from the release, or build from source. `~/.claude` is
