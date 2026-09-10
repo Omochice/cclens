@@ -49,7 +49,8 @@ enum Command {
     /// automatically before every report — call it directly only to refresh
     /// without reading anything.
     Analyze {
-        /// Transcript root (default: ~/.claude/projects).
+        /// Transcript root (default: $CLAUDE_CONFIG_DIR/projects, or
+        /// ~/.claude/projects).
         #[arg(long)]
         projects: Option<PathBuf>,
         /// Output format: table | json (the run's counters).
@@ -202,7 +203,8 @@ enum Command {
     /// with the full analysis, which investigates each problem and proposes
     /// concrete config edits for your approval.
     Optimize {
-        /// Transcript root (default: ~/.claude/projects).
+        /// Transcript root (default: $CLAUDE_CONFIG_DIR/projects, or
+        /// ~/.claude/projects).
         #[arg(long)]
         projects: Option<PathBuf>,
         /// Store to analyze into / read from (default:
@@ -2531,22 +2533,26 @@ fn home_dir() -> Option<&'static str> {
     .as_deref()
 }
 
-fn claude_config_dir(home: Option<&Path>) -> Result<PathBuf> {
+fn claude_config_dir(config_dir: Option<&Path>, home: Option<&Path>) -> Result<PathBuf> {
+    if let Some(dir) = config_dir.filter(|dir| !dir.as_os_str().is_empty()) {
+        return Ok(dir.to_path_buf());
+    }
     // What can go wrong differs by platform, so the advice does too: only
     // Windows requires the value to name a real directory, and telling a unix
     // user otherwise sends them looking for a problem they do not have.
     let home = home.with_context(|| {
         if cfg!(windows) {
-            "set HOME or USERPROFILE to an existing directory"
+            "set CLAUDE_CONFIG_DIR, or HOME/USERPROFILE to an existing directory"
         } else {
-            "HOME is not set"
+            "set CLAUDE_CONFIG_DIR or HOME"
         }
     })?;
     Ok(home.join(".claude"))
 }
 
 fn claude_home() -> Result<PathBuf> {
-    claude_config_dir(home_dir().map(Path::new))
+    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+    claude_config_dir(config_dir.as_deref(), home_dir().map(Path::new))
 }
 
 /// Resolve `--db`, defaulting to a **user-level** store rather than a
@@ -3074,13 +3080,33 @@ mod tests {
     #[test]
     fn claude_config_dir_is_dot_claude_under_home() {
         assert_eq!(
-            claude_config_dir(Some(Path::new("/tmp/example/home"))).unwrap(),
+            claude_config_dir(None, Some(Path::new("/tmp/example/home"))).unwrap(),
+            PathBuf::from("/tmp/example/home/.claude")
+        );
+    }
+
+    #[test]
+    fn claude_config_dir_prefers_an_explicit_config_dir_over_home() {
+        assert_eq!(
+            claude_config_dir(
+                Some(Path::new("/tmp/example/cfg")),
+                Some(Path::new("/tmp/example/home"))
+            )
+            .unwrap(),
+            PathBuf::from("/tmp/example/cfg")
+        );
+    }
+
+    #[test]
+    fn claude_config_dir_falls_back_to_home_for_an_empty_config_dir() {
+        assert_eq!(
+            claude_config_dir(Some(Path::new("")), Some(Path::new("/tmp/example/home"))).unwrap(),
             PathBuf::from("/tmp/example/home/.claude")
         );
     }
 
     #[test]
     fn claude_config_dir_without_a_home_is_an_error() {
-        assert!(claude_config_dir(None).is_err());
+        assert!(claude_config_dir(None, None).is_err());
     }
 }
