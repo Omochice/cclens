@@ -2531,18 +2531,22 @@ fn home_dir() -> Option<&'static str> {
     .as_deref()
 }
 
-fn claude_home() -> Result<PathBuf> {
+fn claude_config_dir(home: Option<&Path>) -> Result<PathBuf> {
     // What can go wrong differs by platform, so the advice does too: only
     // Windows requires the value to name a real directory, and telling a unix
     // user otherwise sends them looking for a problem they do not have.
-    let home = home_dir().with_context(|| {
+    let home = home.with_context(|| {
         if cfg!(windows) {
             "set HOME or USERPROFILE to an existing directory"
         } else {
             "HOME is not set"
         }
     })?;
-    Ok(PathBuf::from(home).join(".claude"))
+    Ok(home.join(".claude"))
+}
+
+fn claude_home() -> Result<PathBuf> {
+    claude_config_dir(home_dir().map(Path::new))
 }
 
 /// Resolve `--db`, defaulting to a **user-level** store rather than a
@@ -3065,5 +3069,18 @@ mod tests {
             .unwrap(),
             PathBuf::from("./cclens.db")
         );
+    }
+
+    #[test]
+    fn claude_config_dir_is_dot_claude_under_home() {
+        assert_eq!(
+            claude_config_dir(Some(Path::new("/tmp/example/home"))).unwrap(),
+            PathBuf::from("/tmp/example/home/.claude")
+        );
+    }
+
+    #[test]
+    fn claude_config_dir_without_a_home_is_an_error() {
+        assert!(claude_config_dir(None).is_err());
     }
 }
