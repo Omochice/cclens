@@ -2104,13 +2104,17 @@ fn usage_by_time(store: &Store, bucket: Bucket, format: Format) -> Result<()> {
 
 /// Read all installed config (global scope) into one surface list.
 fn read_global_surfaces() -> Result<Vec<Surface>> {
-    let home = claude_home()?;
+    let config_dir = claude_home()?;
     let scope = Scope::Global;
-    let mut surfaces = read_skill_surfaces(&home.join("skills"), &scope);
-    surfaces.extend(read_rule_surfaces(&home.join("rules"), &scope));
-    surfaces.extend(read_agent_surfaces(&home.join("agents"), &scope));
-    surfaces.extend(read_mcp_server_surfaces(&home.join("mcp.json"), &scope));
-    if let Some(claude_md) = read_claude_md_surface(&home.join("CLAUDE.md"), "global", &scope) {
+    let mut surfaces = read_skill_surfaces(&config_dir.join("skills"), &scope);
+    surfaces.extend(read_rule_surfaces(&config_dir.join("rules"), &scope));
+    surfaces.extend(read_agent_surfaces(&config_dir.join("agents"), &scope));
+    surfaces.extend(read_mcp_server_surfaces(
+        &config_dir.join("mcp.json"),
+        &scope,
+    ));
+    if let Some(claude_md) = read_claude_md_surface(&config_dir.join("CLAUDE.md"), "global", &scope)
+    {
         surfaces.push(claude_md);
     }
     Ok(surfaces)
