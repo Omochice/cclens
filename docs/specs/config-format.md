@@ -22,7 +22,7 @@ that still exists on disk (`read_project_surfaces` in `config.rs`); a root that
 was deleted since its sessions ran simply contributes no project surfaces.
 `~/.claude` throughout this document means `$CLAUDE_CONFIG_DIR` when that
 variable names a non-empty path, because Claude Code relocates the whole tree
-under it (`claude_config_dir` in `cli.rs`); an empty value is treated as unset.
+under it (`claude_config_dir` in `config.rs`); an empty value is treated as unset.
 
 | Surface kind | Global | Project-local |
 | --- | --- | --- |
